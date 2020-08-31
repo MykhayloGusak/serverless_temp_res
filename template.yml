@@ -1,0 +1,211 @@
+# This is the SAM template that represents the architecture of your serverless application
+# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-template-basics.html
+
+# The AWSTemplateFormatVersion identifies the capabilities of the template
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/format-version-structure.html
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  user-module
+
+# Transform section specifies one or more macros that AWS CloudFormation uses to process your template
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/transform-section-structure.html
+Transform:
+- AWS::Serverless-2016-10-31
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - pre
+      - prod
+    Description: Run environment.
+
+  MsUserTableName:
+    Type: String
+    Default: ms-user-table-dev
+    AllowedValues:
+      - ms-user-table-dev
+      - ms-user-table-test
+      - ms-user-table-pre
+      - ms-user-table-prod
+      - ms-user-table
+    Description: DynamoDB table name by environment.
+
+Globals:
+  Function:
+    Handler: app.handler
+    Runtime: nodejs12.x
+    MemorySize: 128
+    Timeout: 100
+
+# Resources declares the AWS resources that you want to include in the stack
+# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/resources-section-structure.html
+Resources:
+
+  MsUserHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Env
+      # Auth: 
+      #   Authorizers: 
+      #     JWT:
+      #       authorizerType: JWT
+      #       IdentitySource: "$request.header.Authorization"
+      #       jwtConfiguration: 
+      #         issuer:
+      #         audience:
+      #   DefaultAuthorizer :
+
+  LayerLogic:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: layers/UserBusinessLogic
+      CompatibleRuntimes:
+        - nodejs12.x
+  # Each Lambda function is defined by properties:
+  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+
+
+  signUpUser:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/handlers/sign-up-user
+      Description: HTTP POST method to add a new user to DataBase.
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref MsUserTable
+      Layers:
+        - !Ref LayerLogic
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MsUserTable
+      Events:
+        HttpApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: MsUserHttpApi
+            Method: POST
+            Path: /signup
+            # Auth:
+            #   Authorizer: OpenIdAuth
+            #   AuthorizationScopes:
+            #     - scope1
+            #     - scope2
+
+
+  signInUser:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/handlers/sign-in-user
+      Description: HTTP POST method to authorization by user credentials.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MsUserTable
+      Layers:
+        - !Ref LayerLogic
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MsUserTable
+      Events:
+        HttpApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: MsUserHttpApi
+            Method: POST
+            Path: /signin
+            # Auth:
+            #   Authorizer: OpenIdAuth
+            #   AuthorizationScopes:
+            #     - scope1
+            #     - scope2
+
+  getUserData:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/handlers/get-user-data
+      Description: HTTP GET method to read user data by primary key.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MsUserTable
+      Layers:
+        - !Ref LayerLogic
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MsUserTable
+      Events:
+        HttpApiEvent:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: MsUserHttpApi
+            Method: GET
+            Path: /user/:pk
+            # Auth:
+            #   Authorizer: OpenIdAuth
+            #   AuthorizationScopes:
+            #     - scope1
+            #     - scope2
+            
+  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlesssimpletable
+
+  # DynamoDB table to store item: {id: &lt;ID&gt;, name: &lt;NAME&gt;}
+  # SampleTable:
+  #   Type: AWS::Serverless::SimpleTable
+  #   Properties:
+  #     PrimaryKey:
+  #       Name: pk
+  #       Type: String
+  #     PrimaryKey:
+  #       Name: sk
+  #       Type: String
+  #     ProvisionedThroughput:
+  #       ReadCapacityUnits: 1
+  #       WriteCapacityUnits: 1
+
+  MsUserTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      TableName: !Ref MsUserTableName
+      BillingMode: PROVISIONED
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      AttributeDefinitions: 
+        - 
+          AttributeName: pk
+          AttributeType: S
+        - 
+          AttributeName: sk
+          AttributeType: S
+      KeySchema: 
+        - 
+          AttributeName: pk
+          KeyType: HASH
+        - 
+          AttributeName: sk
+          KeyType: RANGE
+
+      # PointInTimeRecoverySpecification: 
+      #   PointInTimeRecoverySpecification
+      # SSESpecification: 
+      #   SSESpecification
+      # StreamSpecification: 
+      #   StreamSpecification
+      # Tags: 
+      #   - Tag
+      # TimeToLiveSpecification: 
+      #   TimeToLiveSpecification
+
+Outputs:
+  WebEndpoint:
+    Description: !Sub: API Gateway endpoint URL for ${Env} stage
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}}/"
+
+  MsUserDynamoDBTable:
+    Description: !Sub: DynamoDB ms-user table name for ${Env} stage
+    Value: !GetAtt [MsUserTable, TableName]
